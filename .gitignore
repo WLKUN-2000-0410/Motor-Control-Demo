@@ -1,0 +1,143 @@
+# 操作系统生成的文件
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# 编辑器和IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.sublime-project
+.sublime-workspace
+
+# 编译输出
+*.com
+*.class
+*.dll
+*.exe
+*.o
+*.so
+*.pyc
+*.pyo
+__pycache__/
+*.egg-info/
+dist/
+build/
+out/
+target/
+
+# 日志文件
+*.log
+logs/
+*.log.*
+
+# 临时文件
+*.tmp
+*.temp
+*.cache
+*.pid
+*.seed
+*.cover
+
+# 包管理器
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+package-lock.json
+yarn.lock
+.pnpm-debug.log*
+
+# Python
+venv/
+env/
+.env
+.venv
+ENV/
+env.bak/
+venv.bak/
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.python-version
+
+# Java
+*.jar
+*.war
+*.ear
+*.zip
+*.tar.gz
+*.rar
+
+# .NET
+bin/
+obj/
+*.user
+*.suo
+*.cache
+*.pidb
+*.userprefs
+
+# 数据库
+*.db
+*.sqlite
+*.sqlite3
+
+# 配置文件（包含敏感信息）
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+config.json
+secrets.json
+*.key
+*.pem
+
+# 备份文件
+*.bak
+*.backup
+*.old
+
+# 文档生成
+_site/
+.sass-cache/
+.jekyll-cache/
+.jekyll-metadata
+
+# 其他
+*.orig
+.project
+.classpath
+.settings/
+.metadata/
+
+ipch/
+*.ipch
+
+# 生成的二进制文件和中间文件
+[Dd]ebug/
+[Rr]elease/
+[Xx]64/
+[Aa][Rr][Mm]64/
+[Ww][Ii][Nn]32/
+bin/
+obj/
+
+.vs/
+MotorControl/Debug/
+MotorControl/Release/
+
+# Visual C++ specific files
+*.ilk
+*.lib
+*.pch
+*.pdb
+*.tlog
