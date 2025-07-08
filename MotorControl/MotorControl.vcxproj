@@ -186,6 +186,7 @@
     <Text Include="ReadMe.txt" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="JogButton.h" />
     <ClInclude Include="ModbusRTUHelper.h" />
     <ClInclude Include="MotorControl.h" />
     <ClInclude Include="MotorControlDlg.h" />
@@ -194,6 +195,7 @@
     <ClInclude Include="targetver.h" />
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="JogButton.cpp" />
     <ClCompile Include="ModbusRTUHelper.cpp" />
     <ClCompile Include="MotorControl.cpp" />
     <ClCompile Include="MotorControlDlg.cpp" />

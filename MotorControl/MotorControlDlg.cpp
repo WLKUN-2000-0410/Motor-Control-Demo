@@ -54,6 +54,10 @@ CMotorControlDlg::CMotorControlDlg(CWnd* pParent /*=nullptr*/)
 	: CDialogEx(IDD_MOTORCONTROL_DIALOG, pParent)
 	, m_nBaudRate(19200) // 后续变成可选项
 	, m_nNodeID(1)       // 这个后续变成可选项 
+	, m_dJogSpeed(10.0)    // 默认速度 10 rps
+	, m_dJogAccel(100.0)   // 默认加速度 100 rps/s
+	, m_dJogDecel(100.0)
+	, m_sCurrentPosition(_T("0 steps"))
 
 {
 	m_hIcon = AfxGetApp()->LoadIcon(IDR_MAINFRAME); //加载并设置应用程序图标，左上角，任务栏中的  
@@ -82,7 +86,15 @@ void CMotorControlDlg::DoDataExchange(CDataExchange* pDX)
 	DDX_Control(pDX, IDC_LED_X1, m_ledX1);
 	DDX_Control(pDX, IDC_LED_X2, m_ledX2);
 	DDX_Control(pDX, IDC_LED_X3, m_ledX3);
-
+	DDX_Text(pDX, IDC_EDIT_JOG_SPEED, m_dJogSpeed);
+	DDX_Text(pDX, IDC_EDIT_JOG_ACCEL, m_dJogAccel);
+	DDX_Text(pDX, IDC_EDIT_JOG_DECEL, m_dJogDecel);
+	DDX_Text(pDX, IDC_EDIT_CURRENT_POS, m_sCurrentPosition);
+	DDX_Control(pDX, IDC_BUTTON_JOG_PLUS, m_btnJogPlus);
+	DDX_Control(pDX, IDC_BUTTON_JOG_MINUS, m_btnJogMinus);
+	DDX_Control(pDX, IDC_BUTTON_JOG_PLUS, m_btnJogPlus);
+	DDX_Control(pDX, IDC_BUTTON_JOG_MINUS, m_btnJogMinus);
+	DDX_Control(pDX, IDC_EDIT_CURRENT_POS, m_editCurrentPosition);
 }
 
 BEGIN_MESSAGE_MAP(CMotorControlDlg, CDialogEx)
@@ -94,6 +106,8 @@ BEGIN_MESSAGE_MAP(CMotorControlDlg, CDialogEx)
 	ON_BN_CLICKED(IDC_BUTTON_DISCONNECT, &CMotorControlDlg::OnBnClickedButtonDisconnect)
 	ON_BN_CLICKED(IDC_BUTTON_HOME, &CMotorControlDlg::OnBnClickedButtonHome)
 	ON_BN_CLICKED(IDC_BUTTON_TEST, &CMotorControlDlg::OnBnClickedButtonTest)
+	ON_MESSAGE(WM_JOG_BUTTON_DOWN, &CMotorControlDlg::OnJogButtonDown)
+	ON_MESSAGE(WM_JOG_BUTTON_UP, &CMotorControlDlg::OnJogButtonUp)
 END_MESSAGE_MAP()
 
 
@@ -127,8 +141,7 @@ BOOL CMotorControlDlg::OnInitDialog()
 	SetIcon(m_hIcon, TRUE);			// 设置大图标
 	SetIcon(m_hIcon, FALSE);		// 设置小图标
 
-									// 初始化连接状态为未连接
-	
+	// 初始化连接状态为未连接
 	UpdateConnectStatus(false);
 
 	// 扫描COM端口
@@ -191,7 +204,13 @@ void CMotorControlDlg::UpdateConnectStatus(bool isConnect)
 	// 更新按钮状态
 	GetDlgItem(IDC_BUTTON_CONNECT)->EnableWindow(!isConnect);
 	GetDlgItem(IDC_BUTTON_DISCONNECT)->EnableWindow(isConnect);
-
+	// ---  更新JOG相关控件的使能状态 ---
+	GetDlgItem(IDC_BUTTON_HOME)->EnableWindow(isConnect);
+	GetDlgItem(IDC_EDIT_JOG_SPEED)->EnableWindow(isConnect);
+	GetDlgItem(IDC_EDIT_JOG_ACCEL)->EnableWindow(isConnect);
+	GetDlgItem(IDC_EDIT_JOG_DECEL)->EnableWindow(isConnect);
+	GetDlgItem(IDC_BUTTON_JOG_PLUS)->EnableWindow(isConnect);
+	GetDlgItem(IDC_BUTTON_JOG_MINUS)->EnableWindow(isConnect);
 	// 更新COM口选择状态
 	m_cmbComPort.EnableWindow(!isConnect);
 	m_cmbBaud.EnableWindow(!isConnect);
@@ -447,60 +466,53 @@ void CMotorControlDlg::OnBnClickedButtonHome()
 
 	BOOL bResult = m_ModbusRTUHelper.SeekHome(m_nNodeID, 3, 'L');
 
-	if (bResult)
-	{
-		AfxMessageBox(_T("回零指令已发送！"));
-	}
-	else
-	{
-		AfxMessageBox(_T("回零指令发送失败！请检查电机状态。"));
-	}
+	
 }
 
 
 void CMotorControlDlg::OnBnClickedButtonTest()
 {
-	// TODO: 在此添加控件通知处理程序代码
-	if (!m_ModbusRTUHelper.IsOpen())
-	{
-		AfxMessageBox(_T("请先连接电机！"));
-		return;
-	}
+	//// TODO: 在此添加控件通知处理程序代码
+	//if (!m_ModbusRTUHelper.IsOpen())
+	//{
+	//	AfxMessageBox(_T("请先连接电机！"));
+	//	return;
+	//}
 
-	USHORT inputStatus = 0;
-	BOOL bResult = m_ModbusRTUHelper.ReadDriverBoardInputs( m_nNodeID, &inputStatus);
+	//USHORT inputStatus = 0;
+	//BOOL bResult = m_ModbusRTUHelper.ReadDriverBoardInputs( m_nNodeID, &inputStatus);
 
-	if (bResult)
-	{
-		// 读取成功，现在解析状态
-		// 使用位与(&)操作符来检查特定位是否为1
-		// (1 << 0) 就是 0x0001, (1 << 1) 就是 0x0002, (1 << 2) 就是 0x0004
+	//if (bResult)
+	//{
+	//	// 读取成功，现在解析状态
+	//	// 使用位与(&)操作符来检查特定位是否为1
+	//	// (1 << 0) 就是 0x0001, (1 << 1) 就是 0x0002, (1 << 2) 就是 0x0004
 
-		bool isX1_On = (inputStatus & (1 << 0)) != 0; // 检查 bit 0 (X1)
-		bool isX2_On = (inputStatus & (1 << 1)) != 0; // 检查 bit 1 (X2)
-		bool isX3_On = (inputStatus & (1 << 2)) != 0; // 检查 bit 2 (X3)
+	//	bool isX1_On = (inputStatus & (1 << 0)) != 0; // 检查 bit 0 (X1)
+	//	bool isX2_On = (inputStatus & (1 << 1)) != 0; // 检查 bit 1 (X2)
+	//	bool isX3_On = (inputStatus & (1 << 2)) != 0; // 检查 bit 2 (X3)
 
-		CString msg;
-		msg.Format(_T("输入端口状态:\n")
-			_T("X1: %s\n")
-			_T("X2: %s\n")
-			_T("X3: %s"),
-			isX1_On ? _T("ON (导通/低电平)") : _T("OFF (断开/高电平)"),
-			isX2_On ? _T("ON (导通/低电平)") : _T("OFF (断开/高电平)"),
-			isX3_On ? _T("ON (导通/低电平)") : _T("OFF (断开/高电平)"));
+	//	CString msg;
+	//	msg.Format(_T("输入端口状态:\n")
+	//		_T("X1: %s\n")
+	//		_T("X2: %s\n")
+	//		_T("X3: %s"),
+	//		isX1_On ? _T("ON (导通/低电平)") : _T("OFF (断开/高电平)"),
+	//		isX2_On ? _T("ON (导通/低电平)") : _T("OFF (断开/高电平)"),
+	//		isX3_On ? _T("ON (导通/低电平)") : _T("OFF (断开/高电平)"));
 
-		AfxMessageBox(msg);
+	//	AfxMessageBox(msg);
 
-		m_ledX1.SetIcon(isX1_On ? m_hIconLedGray : m_hIconLedGreen);
-		m_ledX2.SetIcon(isX2_On ? m_hIconLedGray : m_hIconLedGreen);
-		m_ledX3.SetIcon(isX3_On ? m_hIconLedGray : m_hIconLedGreen);
+	//	m_ledX1.SetIcon(isX1_On ? m_hIconLedGray : m_hIconLedGreen);
+	//	m_ledX2.SetIcon(isX2_On ? m_hIconLedGray : m_hIconLedGreen);
+	//	m_ledX3.SetIcon(isX3_On ? m_hIconLedGray : m_hIconLedGreen);
 
-	}
-	else
-	{
-		AfxMessageBox(_T("读取输入状态失败！"));
-	}
-	
+	//}
+	//else
+	//{
+	//	AfxMessageBox(_T("读取输入状态失败！"));
+	//}
+	TestMotorCommunication();
 
 }
 void CMotorControlDlg::OnTimer(UINT_PTR nIDEvent)
@@ -510,6 +522,24 @@ void CMotorControlDlg::OnTimer(UINT_PTR nIDEvent)
 	{
 		//更新LED状态
 		UpdateSensorStatus();
+
+		int nPositionSteps = 0;
+		// 调用API读取电机的立即绝对位置（单位：步）
+		//BOOL bResult = m_ModbusRTUHelper.ReadImmediateAbsolutePosition(m_nNodeID, &nPositionSteps);
+		BOOL bResult = m_ModbusRTUHelper.ReadEncoderPosition(m_nNodeID, &nPositionSteps);
+	    //BOOL bResult = m_ModbusRTUHelper.ReadDistanceOrPosition(m_nNodeID, &nPositionSteps);
+
+
+		if (bResult)
+		{
+			// 直接将获取到的步数格式化为字符串
+			CString strPos;
+			strPos.Format(_T("%d steps"), nPositionSteps);
+
+			// 直接更新UI文本框的内容
+			m_editCurrentPosition.SetWindowText(strPos);
+		}
+
 	}
 
 	CDialogEx::OnTimer(nIDEvent); 
@@ -537,4 +567,62 @@ void CMotorControlDlg::UpdateSensorStatus()
 		m_ledX2.SetIcon(isX2_On ? m_hIconLedGray : m_hIconLedGreen);
 		m_ledX3.SetIcon(isX3_On ? m_hIconLedGray : m_hIconLedGreen);
 	}
+}
+
+
+
+afx_msg LRESULT CMotorControlDlg::OnJogButtonDown(WPARAM wParam, LPARAM lParam)
+{
+	// 从UI获取最新的参数
+	UpdateData(TRUE);
+
+	// 检查是否已连接
+	if (!m_ModbusRTUHelper.IsOpen())
+	{
+		return 0;
+	}
+
+	// 获取是哪个按钮被按下了
+	UINT nBtnID = (UINT)wParam;
+
+	double dSpeed = m_dJogSpeed;
+	double dAccel = m_dJogAccel;
+	// 通常JOG的减速度和加速度可以设为一样
+	 double dDecel = m_dJogDecel;
+
+	if (nBtnID == IDC_BUTTON_JOG_MINUS)
+	{
+		// 如果是JOG-按钮，将速度设为负值
+		dSpeed = -m_dJogSpeed;
+	}
+
+	// 根据官方示例，JOG前最好先调用此函数
+	m_ModbusRTUHelper.WriteDistanceOrPosition(m_nNodeID, 1);
+
+	// 设置JOG参数
+	BOOL ret = m_ModbusRTUHelper.SetJogProfile(m_nNodeID, &dSpeed, &dAccel, &dDecel);
+	if (!ret)
+	{
+		AfxMessageBox(_T("设置JOG参数失败！"));
+		return 0;
+	}
+
+	// 启动JOG
+	m_ModbusRTUHelper.StartJogging(m_nNodeID);
+
+	return 0;
+}
+
+afx_msg LRESULT CMotorControlDlg::OnJogButtonUp(WPARAM wParam, LPARAM lParam)
+{
+	// 检查是否已连接
+	if (!m_ModbusRTUHelper.IsOpen())
+	{
+		return 0;
+	}
+
+	// 停止JOG运动，无论哪个按钮抬起都执行此操作
+	m_ModbusRTUHelper.StopJogging(m_nNodeID);
+
+	return 0;
 }

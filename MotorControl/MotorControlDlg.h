@@ -4,7 +4,7 @@
 
 #pragma once
 #include "ModbusRTUHelper.h"
-
+#include "JogButton.h"
 // CMotorControlDlg 对话框
 class CMotorControlDlg : public CDialogEx
 {
@@ -32,10 +32,22 @@ protected:
 	int m_nBaudRate;
 	byte m_nNodeID;
 	
+	double m_dJogSpeed;
+	double m_dJogAccel;
+	double m_dJogDecel;
+
+	CString m_sCurrentPosition;
+
 	// 控件变量
 	CComboBox m_cmbComPort;
 	CComboBox m_cmbBaud;
 	CComboBox m_cmbNodeID;
+	CEdit m_editJogSpeed;
+	CEdit m_editJogAccel;
+	CEdit m_editJogDecel;
+	CJogButton m_btnJogPlus;  
+	CJogButton m_btnJogMinus; 
+	CEdit m_editCurrentPosition;
 
 	//LED
 	CStatic m_ledX1;
@@ -50,6 +62,8 @@ protected:
 	afx_msg void OnPaint();
 	afx_msg HCURSOR OnQueryDragIcon();
 	afx_msg void OnTimer(UINT_PTR nIDEvent);
+	afx_msg LRESULT OnJogButtonDown(WPARAM wParam, LPARAM lParam);
+	afx_msg LRESULT OnJogButtonUp(WPARAM wParam, LPARAM lParam);
 	DECLARE_MESSAGE_MAP()
 
 	//测试按钮，后续删除
@@ -64,5 +78,5 @@ public:
 private:
 	void UpdateSensorStatus();  //更新传感器状态
 	void ScanComPorts();
-	void CMotorControlDlg::UpdateConnectStatus(bool isConnect);
+	void UpdateConnectStatus(bool isConnect);
 };
