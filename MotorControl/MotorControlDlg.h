@@ -37,8 +37,16 @@ protected:
 	double m_dJogDecel;
 
 	CString m_sCurrentPosition;
-	BOOL m_bAutoHomeOnConnect; // <--- 1. 与复选框关联的变量
-	bool m_bIsHoming;          // <--- 2. 正在回零的状态标志
+	BOOL m_bAutoHomeOnConnect; 
+	bool m_bIsHoming;          //  正在回零的状态标志
+	bool m_bIsEscapingHomeSensor;
+
+	double m_dPtpVelocity;   // PTP: Point-to-Point
+	double m_dPtpAccel;
+	double m_dPtpDecel;
+	int m_nAbsPosition;
+	int m_nRelPosition;
+	int m_nRelDirection;     // 0 for CW (正向), 1 for CCW (反向)
 
 	// 控件变量
 	CComboBox m_cmbComPort;
@@ -46,10 +54,11 @@ protected:
 	CComboBox m_cmbNodeID;
 	CEdit m_editJogSpeed;
 	CEdit m_editJogAccel;
-	CEdit m_editJogDecel;
-	CJogButton m_btnJogPlus;  
-	CJogButton m_btnJogMinus; 
-	CEdit m_editCurrentPosition;
+	CEdit m_editJogDecel;       
+	CJogButton m_btnJogPlus;      //正转
+	CJogButton m_btnJogMinus;     //反转
+	CEdit m_editCurrentPosition;  //当前位置
+	CComboBox m_cmbRelDirection;  //方向选择
 
 	//LED
 	CStatic m_ledX1;
@@ -77,9 +86,16 @@ public:
 	afx_msg void OnBnClickedButtonHome();
 	afx_msg void OnBnClickedButtonTest();
 
+	afx_msg void OnBnClickedButtonAbsMoveStart();
+	afx_msg void OnBnClickedButtonAbsMoveStop();
+	afx_msg void OnBnClickedButtonRelMoveStart();
+	afx_msg void OnBnClickedButtonRelMoveStop();
+
 private:
 	void UpdateSensorStatus();  //更新传感器状态
 	void ScanComPorts();
 	void UpdateConnectStatus(bool isConnect, bool isHoming = false); // <--- 3. 修改函数声明以处理回零状态
 	void CheckHomingStatus();
+	void StartHomingProcess();
+	void ExecuteOneEscapeStep();
 };
