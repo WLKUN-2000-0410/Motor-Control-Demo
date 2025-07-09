@@ -5,6 +5,9 @@
 #include "MotorControl.h"
 #include "MotorControlDlg.h"
 #include "afxdialogex.h"
+#include <Shlwapi.h>          
+#pragma comment(lib, "shlwapi.lib") 
+
 
 #ifdef _DEBUG
 #define new DEBUG_NEW
@@ -113,6 +116,7 @@ void CMotorControlDlg::DoDataExchange(CDataExchange* pDX)
 	DDX_Text(pDX, IDC_EDIT_REL_POS, m_nRelPosition);
 	DDX_Control(pDX, IDC_COMBO_REL_DIRECTION, m_cmbRelDirection);
 	DDX_CBIndex(pDX, IDC_COMBO_REL_DIRECTION, m_nRelDirection);
+	DDX_Control(pDX, IDC_EDIT_LOG, m_editLog);
 }
 
 BEGIN_MESSAGE_MAP(CMotorControlDlg, CDialogEx)
@@ -209,6 +213,8 @@ BOOL CMotorControlDlg::OnInitDialog()
 	m_cmbRelDirection.AddString(_T("CW (Clockwise)"));    // Index 0
 	m_cmbRelDirection.AddString(_T("CCW (Counter-Clockwise)")); // Index 1
 	m_cmbRelDirection.SetCurSel(0); // 默认选中CW
+
+	m_editLog.SetWindowText(_T(""));
 
 	UpdateData(FALSE); // 将所有成员变量的初始值更新到UI上
 	return TRUE;
@@ -393,6 +399,9 @@ void CMotorControlDlg::OnBnClickedButtonConnect()
 
 	if (bResult)
 	{
+		
+		AppendLog(_T("COM连接成功。"));
+
 		SetTimer(ID_TIMER_UPDATE_STATUS, TIMER_INTERVAL, NULL);
 		if (m_bAutoHomeOnConnect)
 		{
@@ -406,6 +415,7 @@ void CMotorControlDlg::OnBnClickedButtonConnect()
 	else
 	{
 		// 连接失败
+		AppendLog(_T("COM连接失败，请检查端口是否被占用。"));
 		UpdateConnectStatus(false, false);
 		AfxMessageBox(_T("连接失败，请检查端口是否被占用"));
 	}
@@ -418,7 +428,7 @@ void CMotorControlDlg::OnBnClickedButtonDisconnect()
 {
 
 	KillTimer(ID_TIMER_UPDATE_STATUS); //先停止定时器
-
+	AppendLog(_T("COM连接断开。"));
 
 	m_ModbusRTUHelper.Close();	// 断开连接
 
@@ -900,4 +910,85 @@ void CMotorControlDlg::OnBnClickedButtonRelMoveStop()
 {
 	if (!m_ModbusRTUHelper.IsOpen()) return;
 	m_ModbusRTUHelper.StopAndKillwithNormalDecel(m_nNodeID);
+}
+
+void CMotorControlDlg::AppendLog(const CString& sMessage)
+{
+	// 1. 获取当前时间并格式化
+	CString sTime = CTime::GetCurrentTime().Format(_T("[%Y-%m-%d %H:%M:%S] "));
+	CString sLogEntry = sTime + sMessage + _T("\r\n");
+
+	// 2. 在UI界面上实时追加日志
+	int nLength = m_editLog.GetWindowTextLength();
+	m_editLog.SetSel(nLength, nLength);
+	m_editLog.ReplaceSel(sLogEntry);
+
+	// 3. 检查并滚动日志文件
+	RotateLogFiles();
+
+	// 4. 将日志写入物理文件
+	try
+	{
+		CStdioFile file;
+		// 使用新的辅助函数来获取完整路径
+		if (file.Open(GetLogFilePath(_T("MotorControl.log")), CFile::modeCreate | CFile::modeNoTruncate | CFile::modeWrite | CFile::typeText))
+		{
+			file.SeekToEnd(); // 移动到文件末尾
+			file.WriteString(sLogEntry);
+			file.Close();
+		}
+	}
+	catch (CFileException* pEx)
+	{
+		pEx->Delete();
+	}
+}
+
+
+// --- 用下面的新版本替换旧的 RotateLogFiles 函数 ---
+void CMotorControlDlg::RotateLogFiles()
+{
+	const ULONGLONG MAX_LOG_SIZE = 500 * 1024 * 1024; // 500 MB
+
+													  // 使用新的辅助函数来获取文件路径
+	CString sLogPath = GetLogFilePath(_T("MotorControl.log"));
+	CString sLogPath1 = GetLogFilePath(_T("MotorControl.1.log"));
+	CString sLogPath2 = GetLogFilePath(_T("MotorControl.2.log"));
+
+	CFileStatus status;
+	if (CFile::GetStatus(sLogPath, status))
+	{
+		if (status.m_size >= MAX_LOG_SIZE)
+		{
+			try
+			{
+				CFile::Remove(sLogPath2);      // 删除 MotorControl.2.log
+				CFile::Rename(sLogPath1, sLogPath2); // 将 .1.log 重命名为 .2.log
+				CFile::Rename(sLogPath, sLogPath1);  // 将 .log 重命名为 .1.log
+			}
+			catch (CFileException* pEx)
+			{
+				pEx->Delete();
+			}
+		}
+	}
+}
+CString CMotorControlDlg::GetLogFilePath(const CString& sFileName)
+{
+	// 1. 获取 .exe 文件所在的完整路径
+	TCHAR szExePath[MAX_PATH] = { 0 };
+	GetModuleFileName(NULL, szExePath, MAX_PATH);
+
+	// 2. 从完整路径中移除 .exe 文件名，只剩下目录
+	PathRemoveFileSpec(szExePath);
+
+	// 3. 构建 log 文件夹的路径
+	CString sLogDir = szExePath;
+	sLogDir += _T("\\log");
+
+	// 4. 创建 log 文件夹 (如果文件夹已存在，此函数不会做任何事，非常安全)
+	CreateDirectory(sLogDir, NULL);
+
+	// 5. 返回最终的、包含文件夹的完整文件路径
+	return sLogDir + _T("\\") + sFileName;
 }

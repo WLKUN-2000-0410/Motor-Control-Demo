@@ -67,6 +67,9 @@ protected:
 	HICON m_hIconLedGreen; 
 	HICON m_hIconLedGray;  
 
+	//LED
+	CEdit m_editLog;
+
 	// 生成的消息映射函数
 	virtual BOOL OnInitDialog();
 	afx_msg void OnSysCommand(UINT nID, LPARAM lParam);
@@ -98,4 +101,8 @@ private:
 	void CheckHomingStatus();
 	void StartHomingProcess();
 	void ExecuteOneEscapeStep();
+	//log
+	void AppendLog(const CString& sMessage); // 统一的日志追加函数
+	void RotateLogFiles();                   // 负责检查和滚动日志文件的函数
+	CString GetLogFilePath(const CString& sFileName);
 };
