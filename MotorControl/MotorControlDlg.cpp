@@ -58,11 +58,12 @@ CMotorControlDlg::CMotorControlDlg(CWnd* pParent /*=nullptr*/)
 	, m_dJogAccel(100.0)   // 默认加速度 100 rps/s
 	, m_dJogDecel(100.0)
 	, m_sCurrentPosition(_T("0 steps"))
-
+	, m_bAutoHomeOnConnect(TRUE) // <--- 1. 默认勾选“自动回零”
 {
 	m_hIcon = AfxGetApp()->LoadIcon(IDR_MAINFRAME); //加载并设置应用程序图标，左上角，任务栏中的  
 	m_hIconLedGray = NULL; // 初始化为 NULL
 	m_hIconLedGreen = NULL;
+	m_bIsHoming = false;
 }
 
 
@@ -95,6 +96,7 @@ void CMotorControlDlg::DoDataExchange(CDataExchange* pDX)
 	DDX_Control(pDX, IDC_BUTTON_JOG_PLUS, m_btnJogPlus);
 	DDX_Control(pDX, IDC_BUTTON_JOG_MINUS, m_btnJogMinus);
 	DDX_Control(pDX, IDC_EDIT_CURRENT_POS, m_editCurrentPosition);
+	DDX_Check(pDX, IDC_CHECK_AUTO_HOME, m_bAutoHomeOnConnect);
 }
 
 BEGIN_MESSAGE_MAP(CMotorControlDlg, CDialogEx)
@@ -183,38 +185,49 @@ BOOL CMotorControlDlg::OnInitDialog()
 	}
 
 
-
+	UpdateData(FALSE); // 将所有成员变量的初始值更新到UI上
 	return TRUE;
 }
 
-void CMotorControlDlg::UpdateConnectStatus(bool isConnect)
+void CMotorControlDlg::UpdateConnectStatus(bool isConnect, bool isHoming)
 {
 	// 更新窗口标题
 	CString title;
-	if (isConnect)
-	{
-		title.Format(_T("Motor Control Demo - Connected (COM%d)"), m_nCOMPort);
-	}
-	else
+	if (!isConnect)
 	{
 		title = _T("Motor Control Demo - Unconnected");
 	}
-	SetWindowText(title);
+	else if (isHoming)
+	{
+		title = _T("Motor Control - Homing..."); // 正在回零时，显示 "Homing..."
+	}
+	else
+	{
+		title.Format(_T("Motor Control Demo - Connected (COM%d)"), m_nCOMPort); // 普通连接时，显示 "Connected..."
+	}
+	SetWindowText(title); // 统一在这里设置标题
 
-	// 更新按钮状态
+	
+	// 更新常规连接/断开按钮状态
 	GetDlgItem(IDC_BUTTON_CONNECT)->EnableWindow(!isConnect);
-	GetDlgItem(IDC_BUTTON_DISCONNECT)->EnableWindow(isConnect);
-	// ---  更新JOG相关控件的使能状态 ---
-	GetDlgItem(IDC_BUTTON_HOME)->EnableWindow(isConnect);
-	GetDlgItem(IDC_EDIT_JOG_SPEED)->EnableWindow(isConnect);
-	GetDlgItem(IDC_EDIT_JOG_ACCEL)->EnableWindow(isConnect);
-	GetDlgItem(IDC_EDIT_JOG_DECEL)->EnableWindow(isConnect);
-	GetDlgItem(IDC_BUTTON_JOG_PLUS)->EnableWindow(isConnect);
-	GetDlgItem(IDC_BUTTON_JOG_MINUS)->EnableWindow(isConnect);
-	// 更新COM口选择状态
-	m_cmbComPort.EnableWindow(!isConnect);
-	m_cmbBaud.EnableWindow(!isConnect);
-	m_cmbNodeID.EnableWindow(!isConnect);
+	GetDlgItem(IDC_BUTTON_DISCONNECT)->EnableWindow(isConnect && !isHoming); // 正在回零时不允许断开
+
+																			 // 根据是否连接和是否正在回零来决定其他运动按钮的状态
+	BOOL bEnableMotionButtons = isConnect && !isHoming;
+
+	GetDlgItem(IDC_BUTTON_HOME)->EnableWindow(bEnableMotionButtons);
+	GetDlgItem(IDC_EDIT_JOG_SPEED)->EnableWindow(bEnableMotionButtons);
+	GetDlgItem(IDC_EDIT_JOG_ACCEL)->EnableWindow(bEnableMotionButtons);
+	GetDlgItem(IDC_EDIT_JOG_DECEL)->EnableWindow(bEnableMotionButtons);
+	GetDlgItem(IDC_BUTTON_JOG_PLUS)->EnableWindow(bEnableMotionButtons);
+	GetDlgItem(IDC_BUTTON_JOG_MINUS)->EnableWindow(bEnableMotionButtons);
+
+	// 更新COM口和配置选择的状态
+	BOOL bEnableConfig = !isConnect;
+	m_cmbComPort.EnableWindow(bEnableConfig);
+	m_cmbBaud.EnableWindow(bEnableConfig);
+	m_cmbNodeID.EnableWindow(bEnableConfig);
+	GetDlgItem(IDC_CHECK_AUTO_HOME)->EnableWindow(bEnableConfig); // 连接前才可设置
 }
 
 void CMotorControlDlg::ScanComPorts()
@@ -301,6 +314,7 @@ HCURSOR CMotorControlDlg::OnQueryDragIcon()
 
 void CMotorControlDlg::OnBnClickedButtonConnect()
 {
+	UpdateData(TRUE);// 获取复选框的最新状态到 m_bAutoHomeOnConnect
 	// 获取选择的COM端口
 	CString strPort;
 	int nSel = m_cmbComPort.GetCurSel();
@@ -336,19 +350,41 @@ void CMotorControlDlg::OnBnClickedButtonConnect()
 	m_nBaudRate = _ttoi(strBaudRate); // 将字符串转换为整数，并更新成员变量
 
 	BOOL bResult = m_ModbusRTUHelper.Open(m_nCOMPort, m_nBaudRate, TRUE);
+	
 
 	if (bResult)
 	{
-		// 连接成功
-		SetTimer(ID_TIMER_UPDATE_STATUS, TIMER_INTERVAL, NULL);  //启动定时器
-		UpdateConnectStatus(true);
-		// 成功不弹窗，只更新状态
+		// 判断是否勾选归零
+		if (m_bAutoHomeOnConnect)
+		{
+			//SetWindowText(_T("Motor Control - Homing...")); // 更新标题栏提示
+			UpdateConnectStatus(true, true); // 更新UI，进入“正在回零”状态
+
+			// 归零
+			BOOL bHomeResult = m_ModbusRTUHelper.SeekHome(m_nNodeID, 3, 'L');
+			if (bHomeResult)
+			{
+				m_bIsHoming = true; // 设置回零状态标志
+			}
+			else
+			{
+				m_bIsHoming = false; // 指令发送失败，复位状态
+				AfxMessageBox(_T("自动回零指令发送失败！"));
+				UpdateConnectStatus(true, false); // 恢复UI到普通连接状态
+			}
+		}
+		else
+		{
+			// 如果没有勾选，直接进入普通连接状态
+			UpdateConnectStatus(true, false);
+		}
+
+		SetTimer(ID_TIMER_UPDATE_STATUS, TIMER_INTERVAL, NULL);
 	}
 	else
 	{
 		// 连接失败
-	
-		UpdateConnectStatus(false);
+		UpdateConnectStatus(false, false);
 		AfxMessageBox(_T("连接失败，请检查端口是否被占用"));
 	}
 
@@ -385,7 +421,7 @@ void CMotorControlDlg::TestMotorCommunication()
 
 		CString statusMsg;
 		statusMsg.Format(_T("电机状态码: 0x%04X"), statusCode);
-		AfxMessageBox(statusMsg);
+		//AfxMessageBox(statusMsg);
 
 		// 2. 读取报警代码
 		UINT alarmCode = 0;
@@ -411,7 +447,7 @@ void CMotorControlDlg::TestMotorCommunication()
 			AfxMessageBox(_T("电机使能失败！"));
 			return;
 		}
-		AfxMessageBox(_T("电机使能成功！"));
+	//	AfxMessageBox(_T("电机使能成功！"));
 		Sleep(500); // 等待使能完成
 
 					// 4. 设置运动参数并执行小幅相对运动
@@ -427,7 +463,7 @@ void CMotorControlDlg::TestMotorCommunication()
 			return;
 		}
 	    
-		AfxMessageBox(_T("电机开始运动20000步..."));
+		//AfxMessageBox(_T("电机开始运动20000步..."));
 
 		// 5. 执行相对运动 (20000步)
 		int relativeSteps = 20000;
@@ -443,15 +479,16 @@ void CMotorControlDlg::TestMotorCommunication()
 
 		// 7. 读取当前位置
 		int currentPosition = 0;
-		ret = m_ModbusRTUHelper.ReadImmediateAbsolutePosition(m_nNodeID, &currentPosition);
+	//	ret = m_ModbusRTUHelper.ReadImmediateAbsolutePosition(m_nNodeID, &currentPosition);
+		ret = m_ModbusRTUHelper.ReadEncoderPosition(m_nNodeID, &currentPosition);
 		if (ret)
 		{
 			CString posMsg;
-			posMsg.Format(_T("当前位置: %d 步"), currentPosition);
+		//	posMsg.Format(_T("当前位置: %d 步"), currentPosition);
 			AfxMessageBox(posMsg);
 		}
 
-		AfxMessageBox(_T("电机测试完成！通信正常！"));
+	//	AfxMessageBox(_T("电机测试完成！通信正常！"));
 	}
 	catch (...)
 	{
@@ -461,12 +498,23 @@ void CMotorControlDlg::TestMotorCommunication()
 
 void CMotorControlDlg::OnBnClickedButtonHome()
 {
-	// TODO: 在此添加控件通知处理程序代码
+	if (m_bIsHoming) // 防止重复点击
+	{
+		return;
+	}
 
-
+	// 使用SeekHome，假设原点传感器在输入3，低电平有效
 	BOOL bResult = m_ModbusRTUHelper.SeekHome(m_nNodeID, 3, 'L');
-
-	
+	if (bResult)
+	{
+		m_bIsHoming = true; // 设置回零状态标志
+		UpdateConnectStatus(true, true); // 禁用其他按钮，进入回零状态
+		SetWindowText(_T("Motor Control - Homing..."));
+	}
+	else
+	{
+		AfxMessageBox(_T("手动回零指令发送失败！"));
+	}
 }
 
 
@@ -513,21 +561,25 @@ void CMotorControlDlg::OnBnClickedButtonTest()
 	//	AfxMessageBox(_T("读取输入状态失败！"));
 	//}
 	TestMotorCommunication();
-
+	//m_ModbusRTUHelper.SetPosition(m_nNodeID, 0);
 }
 void CMotorControlDlg::OnTimer(UINT_PTR nIDEvent)
 {
 	
 	if (nIDEvent == ID_TIMER_UPDATE_STATUS)
 	{
+		// 检查回零状态
+		CheckHomingStatus();
+
+
 		//更新LED状态
 		UpdateSensorStatus();
 
+		//更新位置显示
 		int nPositionSteps = 0;
-		// 调用API读取电机的立即绝对位置（单位：步）
-		//BOOL bResult = m_ModbusRTUHelper.ReadImmediateAbsolutePosition(m_nNodeID, &nPositionSteps);
-		BOOL bResult = m_ModbusRTUHelper.ReadEncoderPosition(m_nNodeID, &nPositionSteps);
-	    //BOOL bResult = m_ModbusRTUHelper.ReadDistanceOrPosition(m_nNodeID, &nPositionSteps);
+		
+		BOOL bResult = m_ModbusRTUHelper.ReadImmediateAbsolutePosition(m_nNodeID, &nPositionSteps);
+		//BOOL bResult = m_ModbusRTUHelper.ReadEncoderPosition(m_nNodeID, &nPositionSteps);
 
 
 		if (bResult)
@@ -625,4 +677,35 @@ afx_msg LRESULT CMotorControlDlg::OnJogButtonUp(WPARAM wParam, LPARAM lParam)
 	m_ModbusRTUHelper.StopJogging(m_nNodeID);
 
 	return 0;
+}
+void CMotorControlDlg::CheckHomingStatus()
+{
+	if (!m_bIsHoming)
+	{
+		// 如果当前不是在回零状态，直接返回
+		return;
+	}
+
+	UINT statusCode = 0;
+	BOOL bResult = m_ModbusRTUHelper.ReadStatusCode(m_nNodeID, &statusCode);
+
+	if (bResult)
+	{
+		// 检查“回原点中”标志位 (第10位)。当它为0时，表示回零已完成。
+		if ((statusCode & (1 << 10)) == 0)
+		{
+			// 回零过程结束
+			m_bIsHoming = false; // 清除回零状态标志
+
+								 // 强制将当前位置的计数值设置为 0
+			m_ModbusRTUHelper.SetPosition(m_nNodeID, 0);
+
+			// 可以在这里给用户一个明确的提示
+			//AfxMessageBox(_T("自动回零完成，设备已就绪！"));
+
+			// 更新UI，使所有运动按钮可用
+			UpdateConnectStatus(true, false);
+		}
+		// 如果标志位仍然是1，则什么也不做，等待下一个定时器周期再来检查
+	}
 }

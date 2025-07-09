@@ -37,6 +37,8 @@ protected:
 	double m_dJogDecel;
 
 	CString m_sCurrentPosition;
+	BOOL m_bAutoHomeOnConnect; // <--- 1. 与复选框关联的变量
+	bool m_bIsHoming;          // <--- 2. 正在回零的状态标志
 
 	// 控件变量
 	CComboBox m_cmbComPort;
@@ -78,5 +80,6 @@ public:
 private:
 	void UpdateSensorStatus();  //更新传感器状态
 	void ScanComPorts();
-	void UpdateConnectStatus(bool isConnect);
+	void UpdateConnectStatus(bool isConnect, bool isHoming = false); // <--- 3. 修改函数声明以处理回零状态
+	void CheckHomingStatus();
 };
