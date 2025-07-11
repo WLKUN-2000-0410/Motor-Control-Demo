@@ -14,7 +14,7 @@
 #endif
 
 
-const UINT_PTR TIMER_INTERVAL = 200;  //定时器时间间隔
+const UINT_PTR TIMER_INTERVAL = 100;  //定时器时间间隔
 
 // 用于应用程序"关于"菜单项的 CAboutDlg 对话框
 
@@ -55,24 +55,28 @@ END_MESSAGE_MAP()
 
 CMotorControlDlg::CMotorControlDlg(CWnd* pParent /*=nullptr*/)
 	: CDialogEx(IDD_MOTORCONTROL_DIALOG, pParent)
-	, m_nBaudRate(19200) // 后续变成可选项
-	, m_nNodeID(1)       // 这个后续变成可选项 
-	, m_dJogSpeed(10.0)    // 默认速度 10 rps
-	, m_dJogAccel(100.0)   // 默认加速度 100 rps/s
-	, m_dJogDecel(100.0)
-	, m_sCurrentPosition(_T("0 steps"))
-	, m_bAutoHomeOnConnect(TRUE) //  默认勾选“自动回零”
-	, m_dPtpVelocity(10.0)
-	, m_dPtpAccel(100.0)
-	, m_dPtpDecel(100.0)
-	, m_nAbsPosition(20000)
-	, m_nRelPosition(20000)
-	, m_nRelDirection(0)
+	, m_nBaudRate(19200)				//默认19200
+	, m_nNodeID(1)                      //默认ID为1 
+	, m_dJogSpeed(10.0)                 //JOG默认速度10unit/s
+	, m_dJogAccel(100.0)                //JOG默认加速度100unit/s
+	, m_dJogDecel(100.0)                //JOG默认减速度100unit/s
+	, m_sCurrentPosition(_T("0 steps")) //位置初始显示0steps
+	, m_bAutoHomeOnConnect(TRUE)		//默认勾选“自动回零”
+	, m_dPtpVelocity(10.0)              //PTP默认速度10unit/s
+	, m_dPtpAccel(100.0)				//PTP默认加速度100unit/s
+	, m_dPtpDecel(100.0)				//PTP默认减速度100unit/s
+	, m_nAbsPosition(0)					//Position默认都是0
+	, m_nRelPosition(0)
+	, m_nRelDirection(1)				//默认方向为正
+	, m_nStepsPerRevolution(20000)      //默认20000步
+	, m_dPhysicalValuePerRevolution(1.0)//默认每转1.0个单位 (如1mm)
+	, m_sPhysicalUnitName(_T("mm"))     //默认单位名称为毫米
 {
 	m_hIcon = AfxGetApp()->LoadIcon(IDR_MAINFRAME); //加载并设置应用程序图标，左上角，任务栏中的  
 	m_hIconLedGray = NULL; // 初始化为 NULL
 	m_hIconLedGreen = NULL;
 	m_bIsHoming = false;
+	m_bIsEscapingHomeSensor = false;
 }
 
 
@@ -117,6 +121,10 @@ void CMotorControlDlg::DoDataExchange(CDataExchange* pDX)
 	DDX_Control(pDX, IDC_COMBO_REL_DIRECTION, m_cmbRelDirection);
 	DDX_CBIndex(pDX, IDC_COMBO_REL_DIRECTION, m_nRelDirection);
 	DDX_Control(pDX, IDC_EDIT_LOG, m_editLog);
+	//单位换算
+	DDX_Text(pDX, IDC_EDIT_PHYSICAL_VALUE_PER_REV,m_dPhysicalValuePerRevolution);
+    DDX_Text(pDX, IDC_EDIT_PHYSICAL_UNIT_NAME, m_sPhysicalUnitName);
+	DDX_Text(pDX, IDC_EDIT_STEPS_PER_REV, m_nStepsPerRevolution);
 }
 
 BEGIN_MESSAGE_MAP(CMotorControlDlg, CDialogEx)
@@ -127,7 +135,7 @@ BEGIN_MESSAGE_MAP(CMotorControlDlg, CDialogEx)
 	ON_BN_CLICKED(IDC_BUTTON_CONNECT, &CMotorControlDlg::OnBnClickedButtonConnect)
 	ON_BN_CLICKED(IDC_BUTTON_DISCONNECT, &CMotorControlDlg::OnBnClickedButtonDisconnect)
 	ON_BN_CLICKED(IDC_BUTTON_HOME, &CMotorControlDlg::OnBnClickedButtonHome)
-	ON_BN_CLICKED(IDC_BUTTON_TEST, &CMotorControlDlg::OnBnClickedButtonTest)
+	ON_BN_CLICKED(IDC_BUTTON_TEST, &CMotorControlDlg::OnBnClickedButtonEmergencyStop)
 	ON_BN_CLICKED(IDC_BUTTON_ABS_START, &CMotorControlDlg::OnBnClickedButtonAbsMoveStart)
 	ON_BN_CLICKED(IDC_BUTTON_ABS_STOP, &CMotorControlDlg::OnBnClickedButtonAbsMoveStop)
 	ON_BN_CLICKED(IDC_BUTTON_REL_START, &CMotorControlDlg::OnBnClickedButtonRelMoveStart)
@@ -168,38 +176,34 @@ BOOL CMotorControlDlg::OnInitDialog()
 	SetIcon(m_hIcon, TRUE);			// 设置大图标
 	SetIcon(m_hIcon, FALSE);		// 设置小图标
 
-	// 初始化连接状态为未连接
-	UpdateConnectStatus(false);
-
-	// 扫描COM端口
+	
+	UpdateConnectStatus(false);  //更新窗口标题和按钮使能状态
 	ScanComPorts();
 
-
-	// 初始化波特率下拉框
+	// 初始化波特率下拉框,设置默认选项为 "19200"
 	m_cmbBaud.AddString(_T("9600"));
 	m_cmbBaud.AddString(_T("19200")); 
 	m_cmbBaud.AddString(_T("38400"));
 	m_cmbBaud.AddString(_T("57600"));
 	m_cmbBaud.AddString(_T("115200"));
-
-	// 设置默认选项为 "19200"
-	// SelectString 会自动查找并选中包含该文本的项
 	m_cmbBaud.SelectString(-1, _T("19200"));
 
+	//初始化ID下拉框,设置默认选项为"1"
 	CString strNodeID;
 	for (int i = 1; i <= 20; ++i)
 	{
 		strNodeID.Format(_T("%d"), i);
 		m_cmbNodeID.AddString(strNodeID);
 	}
-	// 设置默认选项为 "1"
 	m_cmbNodeID.SetCurSel(0);
-
+	
+	//加载LED图标
 	m_hIconLedGray = (HICON)LoadImage(AfxGetInstanceHandle(), MAKEINTRESOURCE(IDI_LED_GRAY), IMAGE_ICON, 0, 0, LR_DEFAULTCOLOR);
 	m_hIconLedGreen = (HICON)LoadImage(AfxGetInstanceHandle(), MAKEINTRESOURCE(IDI_LED_GREEN), IMAGE_ICON, 0, 0, LR_DEFAULTCOLOR);
 	if (m_hIconLedGray == NULL )
 	{
-		AfxMessageBox(_T("加载 LED 图标资源失败！"));
+		AfxMessageBox("加载LED图标资源失败!");
+		AppendLog("加载LED图标资源失败!");
 	}
 	else
 	{
@@ -209,14 +213,20 @@ BOOL CMotorControlDlg::OnInitDialog()
 		m_ledX3.SetIcon(m_hIconLedGray);
 	}
 
-	//ptp方向选择
-	m_cmbRelDirection.AddString(_T("CW (Clockwise)"));    // Index 0
-	m_cmbRelDirection.AddString(_T("CCW (Counter-Clockwise)")); // Index 1
-	m_cmbRelDirection.SetCurSel(0); // 默认选中CW
+	//ptp方向选择,默认选中CW,CW为index 0 , CCW为index 1
+	m_cmbRelDirection.AddString(_T("CW (Clockwise)"));
+	m_cmbRelDirection.AddString(_T("CCW (Counter-Clockwise)")); 
+	
+	m_cmbRelDirection.SetCurSel(0);	
 
+	//每次打开软件清空日志框
 	m_editLog.SetWindowText(_T(""));
 
-	UpdateData(FALSE); // 将所有成员变量的初始值更新到UI上
+	UpdateData(FALSE);	// 将所有成员变量的初始值更新到UI上
+	
+	//初始化位置显示(未连接时)
+	m_sCurrentPosition.Format(_T("0.000 %s"), m_sPhysicalUnitName);
+	m_editCurrentPosition.SetWindowText(m_sCurrentPosition);
 	return TRUE;
 }
 
@@ -243,7 +253,7 @@ void CMotorControlDlg::UpdateConnectStatus(bool isConnect, bool isHoming)
 	GetDlgItem(IDC_BUTTON_CONNECT)->EnableWindow(!isConnect);
 	GetDlgItem(IDC_BUTTON_DISCONNECT)->EnableWindow(isConnect && !isHoming); // 正在回零时不允许断开
 
-																			 // 根据是否连接和是否正在回零来决定其他运动按钮的状态
+    // 根据是否连接和是否正在回零来决定其他运动按钮的状态
 	BOOL bEnableMotionButtons = isConnect && !isHoming;
 
 	GetDlgItem(IDC_BUTTON_HOME)->EnableWindow(bEnableMotionButtons);
@@ -273,6 +283,11 @@ void CMotorControlDlg::UpdateConnectStatus(bool isConnect, bool isHoming)
 	m_cmbBaud.EnableWindow(bEnableConfig);
 	m_cmbNodeID.EnableWindow(bEnableConfig);
 	GetDlgItem(IDC_CHECK_AUTO_HOME)->EnableWindow(bEnableConfig); // 连接前才可设置
+
+	//三个运动参数的状态
+    GetDlgItem(IDC_EDIT_PHYSICAL_VALUE_PER_REV)->EnableWindow(bEnableConfig);
+    GetDlgItem(IDC_EDIT_PHYSICAL_UNIT_NAME)->EnableWindow(bEnableConfig);
+    GetDlgItem(IDC_EDIT_STEPS_PER_REV)->EnableWindow(bEnableConfig);
 }
 
 void CMotorControlDlg::ScanComPorts()
@@ -300,7 +315,7 @@ void CMotorControlDlg::ScanComPorts()
 	// 如果有可用端口，默认不选择任何项
 	if (m_cmbComPort.GetCount() > 0)
 	{
-		m_cmbComPort.SetCurSel(-1); // <--- 修改这里！将 0 改为 -1
+		m_cmbComPort.SetCurSel(-1); //默认不选任何项
 	}
 	else
 	{
@@ -360,6 +375,7 @@ HCURSOR CMotorControlDlg::OnQueryDragIcon()
 void CMotorControlDlg::OnBnClickedButtonConnect()
 {
 	UpdateData(TRUE);// 获取复选框的最新状态到 m_bAutoHomeOnConnect
+
 	// 获取选择的COM端口
 	CString strPort;
 	int nSel = m_cmbComPort.GetCurSel();
@@ -375,6 +391,7 @@ void CMotorControlDlg::OnBnClickedButtonConnect()
 	if (strPort == _T("无可用端口"))
 	{
 		AfxMessageBox(_T("没有可用的COM端口"));
+		AppendLog("连接失败--无可用COM端口");
 		return;
 	}
 
@@ -382,8 +399,7 @@ void CMotorControlDlg::OnBnClickedButtonConnect()
 	strPort.Replace(_T("COM"), _T(""));
 	m_nCOMPort = _ttoi(strPort);
 
-	// 尝试连接
-
+	// 获取波特率
 	CString strBaudRate;
 	int nBaudSel = m_cmbBaud.GetCurSel();
 	if (nBaudSel == CB_ERR)
@@ -392,16 +408,38 @@ void CMotorControlDlg::OnBnClickedButtonConnect()
 		return;
 	}
 	m_cmbBaud.GetLBText(nBaudSel, strBaudRate);
-	m_nBaudRate = _ttoi(strBaudRate); // 将字符串转换为整数，并更新成员变量
+	m_nBaudRate = _ttoi(strBaudRate); 
 
-	BOOL bResult = m_ModbusRTUHelper.Open(m_nCOMPort, m_nBaudRate, TRUE);
-	
+	//获取选择的节点ID
+	int nSelNode = m_cmbNodeID.GetCurSel();
+	if (nSelNode == CB_ERR) {
+		AfxMessageBox(_T("请选择节点ID"));
+		return;
+	}
+	m_nNodeID = static_cast<byte>(nSelNode + 1);
 
-	if (bResult)
+	//尝试打开com端口
+	BOOL bOpenResult = m_ModbusRTUHelper.Open(m_nCOMPort, m_nBaudRate, TRUE);
+	if (bOpenResult)
 	{
 		
-		AppendLog(_T("COM连接成功。"));
+		AppendLog(_T("COM端口打开成功，尝试验证电机通信..."));
+		UINT statusCode = 0;
+		if (!m_ModbusRTUHelper.ReadStatusCode(m_nNodeID, &statusCode))
+		{
+			// 通信验证失败
+			m_ModbusRTUHelper.Close(); // 关闭COM端口
+			UpdateConnectStatus(false, false);
+			AfxMessageBox(_T("通信验证失败！请检查节点ID、波特率或电机连接。"));
+			AppendLog(_T("电机通信验证失败，连接中断。"));
+			return; // 退出，不进行后续操作
+		}
+		
+		CString str;
+		str.Format(_T("电机通信验证成功! Node ID: %d, 状态码: 0x%04X"), m_nNodeID, statusCode);
+		AppendLog(str);
 
+		//启动定时器
 		SetTimer(ID_TIMER_UPDATE_STATUS, TIMER_INTERVAL, NULL);
 		if (m_bAutoHomeOnConnect)
 		{
@@ -414,223 +452,88 @@ void CMotorControlDlg::OnBnClickedButtonConnect()
 	}
 	else
 	{
-		// 连接失败
-		AppendLog(_T("COM连接失败，请检查端口是否被占用。"));
+		//连接失败
 		UpdateConnectStatus(false, false);
 		AfxMessageBox(_T("连接失败，请检查端口是否被占用"));
+		AppendLog(_T("COM连接失败，请检查端口是否被占用。"));
 	}
-
 	//TestMotorCommunication();
-
 }
 
 void CMotorControlDlg::OnBnClickedButtonDisconnect()
 {
 
 	KillTimer(ID_TIMER_UPDATE_STATUS); //先停止定时器
-	AppendLog(_T("COM连接断开。"));
-
 	m_ModbusRTUHelper.Close();	// 断开连接
-
+	AppendLog(_T("COM连接断开。"));
 	UpdateConnectStatus(false);
 	m_ledX1.SetIcon(m_hIconLedGray);
 	m_ledX2.SetIcon(m_hIconLedGray);
 	m_ledX3.SetIcon(m_hIconLedGray);
 }
 
-void CMotorControlDlg::TestMotorCommunication()
-{
-	try
-	{
-		// 1. 首先读取电机状态，验证通信
-		UINT statusCode = 0;
-		BOOL ret = m_ModbusRTUHelper.ReadStatusCode(m_nNodeID, &statusCode);
-		if (!ret)
-		{
-			AfxMessageBox(_T("读取电机状态失败！请检查电机连接和节点ID"));
-			return;
-		}
-
-		CString statusMsg;
-		statusMsg.Format(_T("电机状态码: 0x%04X"), statusCode);
-		//AfxMessageBox(statusMsg);
-
-		// 2. 读取报警代码
-		UINT alarmCode = 0;
-		ret = m_ModbusRTUHelper.ReadAlarmCode(m_nNodeID, &alarmCode);
-		if (ret)
-		{
-			if (alarmCode != 0)
-			{
-				CString alarmMsg;
-				alarmMsg.Format(_T("电机有报警: 0x%04X，将尝试复位"), alarmCode);
-				AfxMessageBox(alarmMsg);
-
-				// 复位报警
-				m_ModbusRTUHelper.AlarmReset(m_nNodeID);
-				Sleep(100); // 等待复位完成
-			}
-		}
-
-		// 3. 使能电机
-		ret = m_ModbusRTUHelper.DriveEnable(m_nNodeID, TRUE);
-		if (!ret)
-		{
-			AfxMessageBox(_T("电机使能失败！"));
-			return;
-		}
-	//	AfxMessageBox(_T("电机使能成功！"));
-		Sleep(500); // 等待使能完成
-
-					// 4. 设置运动参数并执行小幅相对运动
-		double velocity = 10.0;    // 10 rps 的速度
-		double accel = 100.0;      // 100 rps? 的加速度
-		double decel = 100.0;      // 100 rps? 的减速度
-
-								   // 设置P2P运动参数
-		ret = m_ModbusRTUHelper.SetP2PProfile(m_nNodeID, &velocity, &accel, &decel);
-		if (!ret)
-		{
-			AfxMessageBox(_T("设置运动参数失败！"));
-			return;
-		}
-	    
-		//AfxMessageBox(_T("电机开始运动20000步..."));
-
-		// 5. 执行相对运动 (20000步)
-		int relativeSteps = 20000;
-		ret = m_ModbusRTUHelper.RelMove(m_nNodeID, relativeSteps, &velocity, &accel, &decel);
-		if (!ret)
-		{
-			AfxMessageBox(_T("启动相对运动失败！"));
-			return;
-		}
-
-		// 6. 等待运动完成（可选）
-		Sleep(2000); // 等待2秒
-
-		// 7. 读取当前位置
-		int currentPosition = 0;
-	//	ret = m_ModbusRTUHelper.ReadImmediateAbsolutePosition(m_nNodeID, &currentPosition);
-		ret = m_ModbusRTUHelper.ReadEncoderPosition(m_nNodeID, &currentPosition);
-		if (ret)
-		{
-			CString posMsg;
-		//	posMsg.Format(_T("当前位置: %d 步"), currentPosition);
-			AfxMessageBox(posMsg);
-		}
-
-	//	AfxMessageBox(_T("电机测试完成！通信正常！"));
-	}
-	catch (...)
-	{
-		AfxMessageBox(_T("电机测试过程中发生异常！"));
-	}
-}
-
 void CMotorControlDlg::OnBnClickedButtonHome()
 {
-	StartHomingProcess();
+	int zeroPosition = 0;
+	m_ModbusRTUHelper.FeedtoPosition(m_nNodeID, &zeroPosition);
 }
 
 
-void CMotorControlDlg::OnBnClickedButtonTest()
+void CMotorControlDlg::OnBnClickedButtonEmergencyStop()  //急停
 {
-	//// TODO: 在此添加控件通知处理程序代码
-	//if (!m_ModbusRTUHelper.IsOpen())
-	//{
-	//	AfxMessageBox(_T("请先连接电机！"));
-	//	return;
-	//}
-
-	//USHORT inputStatus = 0;
-	//BOOL bResult = m_ModbusRTUHelper.ReadDriverBoardInputs( m_nNodeID, &inputStatus);
-
-	//if (bResult)
-	//{
-	//	// 读取成功，现在解析状态
-	//	// 使用位与(&)操作符来检查特定位是否为1
-	//	// (1 << 0) 就是 0x0001, (1 << 1) 就是 0x0002, (1 << 2) 就是 0x0004
-
-	//	bool isX1_On = (inputStatus & (1 << 0)) != 0; // 检查 bit 0 (X1)
-	//	bool isX2_On = (inputStatus & (1 << 1)) != 0; // 检查 bit 1 (X2)
-	//	bool isX3_On = (inputStatus & (1 << 2)) != 0; // 检查 bit 2 (X3)
-
-	//	CString msg;
-	//	msg.Format(_T("输入端口状态:\n")
-	//		_T("X1: %s\n")
-	//		_T("X2: %s\n")
-	//		_T("X3: %s"),
-	//		isX1_On ? _T("ON (导通/低电平)") : _T("OFF (断开/高电平)"),
-	//		isX2_On ? _T("ON (导通/低电平)") : _T("OFF (断开/高电平)"),
-	//		isX3_On ? _T("ON (导通/低电平)") : _T("OFF (断开/高电平)"));
-
-	//	AfxMessageBox(msg);
-
-	//	m_ledX1.SetIcon(isX1_On ? m_hIconLedGray : m_hIconLedGreen);
-	//	m_ledX2.SetIcon(isX2_On ? m_hIconLedGray : m_hIconLedGreen);
-	//	m_ledX3.SetIcon(isX3_On ? m_hIconLedGray : m_hIconLedGreen);
-
-	//}
-	//else
-	//{
-	//	AfxMessageBox(_T("读取输入状态失败！"));
-	//}
-	//TestMotorCommunication();
-	//m_ModbusRTUHelper.SetPosition(m_nNodeID, 0);
-	//UpdateData(TRUE); // 从UI获取最新的参数值
-
-					  // 1. 设置P2P运动参数
-	//BOOL bResult = m_ModbusRTUHelper.SetP2PProfile(m_nNodeID, &m_dPtpVelocity, &m_dPtpAccel, &m_dPtpDecel);
-
 	if (!m_ModbusRTUHelper.IsOpen())
 	{
 		AfxMessageBox(_T("电机未连接。"));
 		return;
 	}
-
-	//AfxMessageBox(_T("执行急停！电机将以最大减速度停止并清除指令队列。"));
 	BOOL bResult = m_ModbusRTUHelper.StopAndKill(m_nNodeID);
-
 	if (bResult)
 	{
-		// 如果成功发送急停指令，应该重置回零状态，因为回零过程会被中断
+		AppendLog(_T("执行急停!电机将以最大减速度停止!"));
+		// 如果成功发送急停指令，重置回零状态，因为回零过程会被中断
 		if (m_bIsHoming || m_bIsEscapingHomeSensor)
 		{
 			m_bIsHoming = false;
 			m_bIsEscapingHomeSensor = false;
-			// 急停会强制停止，所以状态应该恢复到连接就绪
+			//状态恢复到连接就绪
 			UpdateConnectStatus(true, false);
 		}
-	//	AfxMessageBox(_T("急停指令已发送。"));
 	}
 	else
 	{
-	//	AfxMessageBox(_T("急停指令发送失败！"));
+		AppendLog(_T("急停失败!"));
 	}
 }
+
+
 void CMotorControlDlg::OnTimer(UINT_PTR nIDEvent)
 {
-	if (nIDEvent == ID_TIMER_UPDATE_STATUS)
-	{
-		if (!m_ModbusRTUHelper.IsOpen())
-		{
+	if (nIDEvent == ID_TIMER_UPDATE_STATUS) {
+		if (!m_ModbusRTUHelper.IsOpen()) {
 			KillTimer(ID_TIMER_UPDATE_STATUS);
 			return;
 		}
 
-		// 检查并处理回零/脱离状态
+		// 1.检查并处理回零/脱离状态
 		CheckHomingStatus();
 
-		// 更新传感器LED状态
+		// 2.更新传感器LED状态
 		UpdateSensorStatus();
 
-		// 更新位置显示
+		// 3.更新位置显示
 		int nPositionSteps = 0;
-		if (m_ModbusRTUHelper.ReadImmediateAbsolutePosition(m_nNodeID, &nPositionSteps))
-		{
+		if (m_ModbusRTUHelper.ReadImmediateAbsolutePosition(m_nNodeID, &nPositionSteps)) {
 			CString strPos;
-			strPos.Format(_T("%d steps"), nPositionSteps);
+
+			if (IsKinematicParamsValid()) {
+			
+				double dCurrentPosition_units = ConvertStepsToUnits(static_cast<long>(nPositionSteps));
+				strPos.Format(_T("%.3f %s"), dCurrentPosition_units, m_sPhysicalUnitName);
+			}
+			else {
+				strPos.Format(_T("%d steps (Config Invalid)"), nPositionSteps);
+			}
+
 			m_editCurrentPosition.SetWindowText(strPos);
 		}
 	}
@@ -641,7 +544,7 @@ void CMotorControlDlg::UpdateSensorStatus()
 {
 	if (!m_ModbusRTUHelper.IsOpen())
 	{
-		return; // 如果未连接，则不执行任何操作
+		return; 
 	}
 
 	USHORT inputStatus = 0;
@@ -666,49 +569,65 @@ void CMotorControlDlg::UpdateSensorStatus()
 
 afx_msg LRESULT CMotorControlDlg::OnJogButtonDown(WPARAM wParam, LPARAM lParam)
 {
-	// 从UI获取最新的参数
 	UpdateData(TRUE);
-
-	// 检查是否已连接
 	if (!m_ModbusRTUHelper.IsOpen())
 	{
+		return 0;
+	}
+
+	if (!IsKinematicParamsValid()) {
+		AfxMessageBox(_T("运动参数无效,请检查:每转步数,每转单位数,单位名称"));
+		AppendLog(_T("运动参数无效,请检查:每转步数,每转单位数,单位名称"));
 		return 0;
 	}
 
 	// 获取是哪个按钮被按下了
 	UINT nBtnID = (UINT)wParam;
 
-	double dSpeed = m_dJogSpeed;
-	double dAccel = m_dJogAccel;
-	// 通常JOG的减速度和加速度可以设为一样
-	 double dDecel = m_dJogDecel;
+	double dSpeed_units_per_sec = m_dJogSpeed;
+	double dAccel_units_per_sec2 = m_dJogAccel;
+	double dDecel_units_per_sec2 = m_dJogDecel;
+
+	// 转换为驱动器需要的 "转/秒" 和 "转/秒^2" (rps, rps/s^2)
+	double dSpeed_rps = ConvertUnitsPerSecToRps(dSpeed_units_per_sec);
+	double dAccel_rps_s2 = ConvertUnitsPerSecSqToRpsPerSecSq(dAccel_units_per_sec2);
+	double dDecel_rps_s2 = ConvertUnitsPerSecSqToRpsPerSecSq(dDecel_units_per_sec2);
 
 	if (nBtnID == IDC_BUTTON_JOG_MINUS)
 	{
 		// 如果是JOG-按钮，将速度设为负值
-		dSpeed = -m_dJogSpeed;
+		dSpeed_rps = -dSpeed_rps;
 	}
 
-	// 根据官方示例，JOG前最好先调用此函数
+	// 根据官方示例，JOG前最好先调用此函数 (功能未知，但保留)
 	m_ModbusRTUHelper.WriteDistanceOrPosition(m_nNodeID, 1);
 
 	// 设置JOG参数
-	BOOL ret = m_ModbusRTUHelper.SetJogProfile(m_nNodeID, &dSpeed, &dAccel, &dDecel);
+	BOOL ret = m_ModbusRTUHelper.SetJogProfile(m_nNodeID, &dSpeed_rps, &dAccel_rps_s2, &dDecel_rps_s2);
 	if (!ret)
 	{
-		AfxMessageBox(_T("设置JOG参数失败！"));
+		AfxMessageBox(_T("设置JOG参数失败(速度)。"));
+		AppendLog(_T("设置JOG参数失败。(速度)"));
 		return 0;
 	}
 
-	// 启动JOG
-	m_ModbusRTUHelper.StartJogging(m_nNodeID);
+	CString strLog;
+	if (nBtnID == IDC_BUTTON_JOG_MINUS)
+	{
+		strLog.Format(_T("JOG- 启动，速度: %.2f %s/s"), dSpeed_units_per_sec, m_sPhysicalUnitName);
+	}
+	else
+	{
+		strLog.Format(_T("JOG+ 启动，速度: %.2f %s/s"), dSpeed_units_per_sec, m_sPhysicalUnitName);
+	}
 
-	return 0;
+	// 启动JOG运动
+	m_ModbusRTUHelper.StartJogging(m_nNodeID);
+	AppendLog(strLog);
 }
 
 afx_msg LRESULT CMotorControlDlg::OnJogButtonUp(WPARAM wParam, LPARAM lParam)
 {
-	// 检查是否已连接
 	if (!m_ModbusRTUHelper.IsOpen())
 	{
 		return 0;
@@ -735,7 +654,7 @@ void CMotorControlDlg::CheckHomingStatus()
 	if (m_bIsEscapingHomeSensor)
 	{
 		// --- 当前处于“正在脱离”状态 ---
-		// 检查“运动中”状态位 (第4位)。如果为0，表示上一步的-3000步已走完。
+		// 检查“运动中”状态位 (第4位)。如果为0，表示上一步的40000步已走完。
 		if ((statusCode & (1 << 4)) == 0)
 		{
 			// 既然运动停止了，就再次检查传感器状态
@@ -744,24 +663,23 @@ void CMotorControlDlg::CheckHomingStatus()
 
 			if ((inputStatus & (1 << 2)) == 0)
 			{
-				// **传感器依然被触发**，说明脱离还未完成，需要再走一步
-				ExecuteOneEscapeStep(); // 再次发送-3000步指令
+				// **传感器依然被触发**，说明脱离还未完成，需要再走40000步
+				ExecuteOneEscapeStep(); 
 			}
 			else
 			{
 				// **传感器已经脱离！** 脱离阶段成功完成。
 				m_bIsEscapingHomeSensor = false;
-				//AfxMessageBox(_T("脱离传感器完成，开始正式回零。"));
-
-				// 立即启动正式回零
+				AppendLog(_T("正在回零..."));
 				BOOL bResult = m_ModbusRTUHelper.SeekHome(m_nNodeID, 3, 'L');
 				if (bResult)
 				{
-					m_bIsHoming = true; // 进入“正在回零”状态
+					m_bIsHoming = true; // 进入“正在回零”
 				}
 				else
 				{
 					AfxMessageBox(_T("回零指令发送失败！"));
+					AppendLog(_T("回零指令发送失败！"));
 					UpdateConnectStatus(true, false);
 				}
 			}
@@ -776,7 +694,7 @@ void CMotorControlDlg::CheckHomingStatus()
 		{
 			m_bIsHoming = false;
 			m_ModbusRTUHelper.SetPosition(m_nNodeID, 0);
-			//AfxMessageBox(_T("回零完成，设备已就绪！"));
+			AppendLog(_T("回零完成，设备已就绪！"));
 			UpdateConnectStatus(true, false);
 		}
 	}
@@ -785,37 +703,68 @@ void CMotorControlDlg::CheckHomingStatus()
 void CMotorControlDlg::ExecuteOneEscapeStep()
 {
 	UpdateData(TRUE);
-	int escape_dist = 40000;  // 脱离距离 (负数代表反向)
+	if (!IsKinematicParamsValid()) {
+		AfxMessageBox(_T("运动参数无效,请检查:每转步数,每转单位数,单位名称"));
+		AppendLog(_T("运动参数无效,请检查:每转步数,每转单位数,单位名称"));
+		return;
+	}
+	double dPtpVelocity_rps = ConvertUnitsPerSecToRps(m_dPtpVelocity);
+	double dPtpAccel_rps_s2 = ConvertUnitsPerSecSqToRpsPerSecSq(m_dPtpAccel);
+	double dPtpDecel_rps_s2 = ConvertUnitsPerSecSqToRpsPerSecSq(m_dPtpDecel);
 
-	m_ModbusRTUHelper.SetP2PProfile(m_nNodeID, &m_dPtpVelocity,&m_dPtpAccel, &m_dPtpDecel);
-	
-	//m_ModbusRTUHelper.RelMove(m_nNodeID, escape_dist, NULL, NULL, NULL);
-	m_ModbusRTUHelper.FeedtoLength(m_nNodeID, &escape_dist);
+	// 在发起任何运动前，先用PTP参数设置驱动器
+	m_ModbusRTUHelper.SetP2PProfile(m_nNodeID, &dPtpVelocity_rps, &dPtpAccel_rps_s2, &dPtpDecel_rps_s2);
+
+	double escape_dist_units = 2.0;
+	long escape_dist_steps_long = ConvertUnitsToSteps(escape_dist_units);
+	//escape_dist_steps_long = -escape_dist_steps_long;
+	//当前回零往右走
+	if (escape_dist_steps_long > INT_MAX || escape_dist_steps_long < INT_MIN) {
+		CString str;
+		AfxMessageBox(_T("脱离传感器失败：计算的步数 %lld 超出INT_MAX/MIN范围。"), escape_dist_steps_long);
+		str.Format(_T("脱离传感器失败：计算的步数 %lld 超出INT_MAX/MIN范围。"), escape_dist_steps_long);
+		AppendLog(str);
+		return;
+	}
+	int escape_dist_steps = static_cast<int>(escape_dist_steps_long);
+	m_ModbusRTUHelper.FeedtoLength(m_nNodeID, &escape_dist_steps);
 }
 
 void CMotorControlDlg::StartHomingProcess()
 {
+	//真的回零函数
 	if (m_bIsHoming || m_bIsEscapingHomeSensor) // 防止重复触发
 	{
 		return;
 	}
 	UpdateData(TRUE);
 
-	//在发起任何回零动作前，先用PTP参数设置驱动器,其实这一步操作是多余的，因为
-	//脱离的时候就已经设置了速度
-	BOOL bSetProfile = m_ModbusRTUHelper.SetP2PProfile(m_nNodeID, &m_dPtpVelocity, &m_dPtpAccel, &m_dPtpDecel);
-	if (!bSetProfile)
-	{
-		AfxMessageBox(_T("设置PTP参数失败，无法启动回零！"));
+	if (!IsKinematicParamsValid()) {
+		AfxMessageBox(_T("运动参数无效,请检查:每转步数,每转单位数,单位名称"));
+		AppendLog(_T("运动参数无效,请检查:每转步数,每转单位数,单位名称"));
 		return;
 	}
 
+	// 将UI PTP速度/加速度 (物理单位/s) 转换为驱动器需要的 (转/s)
+	double dPtpVelocity_rps = ConvertUnitsPerSecToRps(m_dPtpVelocity);
+	double dPtpAccel_rps_s2 = ConvertUnitsPerSecSqToRpsPerSecSq(m_dPtpAccel);
+	double dPtpDecel_rps_s2 = ConvertUnitsPerSecSqToRpsPerSecSq(m_dPtpDecel);
+
+	// 在发起任何回零动作前，先用PTP参数设置驱动器
+	BOOL bSetProfile = m_ModbusRTUHelper.SetP2PProfile(m_nNodeID, &dPtpVelocity_rps, &dPtpAccel_rps_s2, &dPtpDecel_rps_s2);
+	if (!bSetProfile)
+	{
+		AfxMessageBox(_T("回零失败：回零前设置PTP参数失败。"));
+		AppendLog(_T("回零失败：回零前设置PTP参数失败。"));
+		return;
+	}
 
 	// 检查X3传感器的当前状态
 	USHORT inputStatus = 0;
 	if (!m_ModbusRTUHelper.ReadDriverBoardInputs(m_nNodeID, &inputStatus))
 	{
 		AfxMessageBox(_T("读取传感器状态失败，无法启动回零！"));
+		AppendLog(_T("读取传感器状态失败，无法启动回零！"));
 		return;
 	}
 
@@ -823,10 +772,9 @@ void CMotorControlDlg::StartHomingProcess()
 	if ((inputStatus & (1 << 2)) == 0)
 	{
 		// 情况一：原点传感器已被触发，进入“正在脱离”状态，并执行第一步脱离
-		//AfxMessageBox(_T("原点传感器已被触发，开始执行循环脱离..."));
 		m_bIsEscapingHomeSensor = true;
 		UpdateConnectStatus(true, true); // 更新UI进入“特殊操作中”状态
-		ExecuteOneEscapeStep();          // 执行第一步脱离
+		ExecuteOneEscapeStep();          // 执行第一步脱离,之后再定时器中检查脱离状态,然后执行回零
 	}
 	else
 	{
@@ -846,24 +794,50 @@ void CMotorControlDlg::StartHomingProcess()
 void CMotorControlDlg::OnBnClickedButtonAbsMoveStart()
 {
 	if (!m_ModbusRTUHelper.IsOpen()) return;
-	UpdateData(TRUE); // 从UI获取最新的参数值
+	UpdateData(TRUE); 
 
-	 // 1. 设置P2P运动参数
-	BOOL bResult = m_ModbusRTUHelper.SetP2PProfile(m_nNodeID, &m_dPtpVelocity, &m_dPtpAccel, &m_dPtpDecel);
-	if (!bResult)
-	{
-		AfxMessageBox(_T("设置运动参数失败！"));
+   
+	// 使用新的验证函数
+	CString errorMsg;
+	if (!ValidateMotionParameters(m_nAbsPosition, errorMsg)) {
+		AfxMessageBox(errorMsg);
+		AppendLog(errorMsg);
 		return;
 	}
 
-	// 2. 执行绝对位置运动 (FeedtoPosition)
-	// 注意：AbsMove 是一个封装好的函数，它内部可能也是调用 FeedtoPosition
-	// 这里直接用 FeedtoPosition，因为它更基础。
-	// 如果用 AbsMove，则不需要预先调用 SetP2PProfile。
-	bResult = m_ModbusRTUHelper.FeedtoPosition(m_nNodeID, &m_nAbsPosition);
+	// 将UI PTP速度/加速度 (物理单位/s) 转换为驱动器需要的 (转/s)
+	double dPtpVelocity_rps = ConvertUnitsPerSecToRps(m_dPtpVelocity);
+	double dPtpAccel_rps_s2 = ConvertUnitsPerSecSqToRpsPerSecSq(m_dPtpAccel);
+	double dPtpDecel_rps_s2 = ConvertUnitsPerSecSqToRpsPerSecSq(m_dPtpDecel);
+
+	// 1. 设置P2P运动参数
+	BOOL bResult = m_ModbusRTUHelper.SetP2PProfile(m_nNodeID, &dPtpVelocity_rps, &dPtpAccel_rps_s2, &dPtpDecel_rps_s2);
+	if (!bResult)
+	{
+		
+		AfxMessageBox(_T("运动前设置PTP参数失败(速度)"));
+		AppendLog(_T("运动前设置PTP参数失败(速度)"));
+
+		return;
+	}
+
+	// 2. 将UI输入的绝对位置 (物理单位) 转换为驱动器需要的步数 
+	long nAbsPositionSteps = ConvertUnitsToSteps(m_nAbsPosition);
+
+	// 转换为int（API要求）
+	int nAbsPositionStepsInt = static_cast<int>(nAbsPositionSteps);
+
+	// 3. 执行绝对位置运动 (FeedtoPosition)
+	bResult = m_ModbusRTUHelper.FeedtoPosition(m_nNodeID, &nAbsPositionStepsInt);
 	if (!bResult)
 	{
 		AfxMessageBox(_T("启动绝对运动失败！"));
+		AppendLog(_T("启动绝对运动失败。"));
+	}
+	else {
+		CString str;
+		str.Format(_T("绝对运动启动，目标位置: %.3f %s"), m_nAbsPosition, m_sPhysicalUnitName);
+		AppendLog(str);
 	}
 }
 
@@ -874,34 +848,56 @@ void CMotorControlDlg::OnBnClickedButtonAbsMoveStop()
 	// 使用 StopAndKillwithNormalDecel 可以在正常减速度下停止，体验更好
 	// 如果需要紧急停止，使用 StopAndKill
 	m_ModbusRTUHelper.StopAndKillwithNormalDecel(m_nNodeID);
+	AppendLog(_T("绝对运动停止。"));
 }
 
 // --- 相对运动 Start ---
 void CMotorControlDlg::OnBnClickedButtonRelMoveStart()
 {
 	if (!m_ModbusRTUHelper.IsOpen()) return;
-	UpdateData(TRUE); 
+	UpdateData(TRUE);
 
-	// 1. 设置P2P运动参数
-	BOOL bResult = m_ModbusRTUHelper.SetP2PProfile(m_nNodeID, &m_dPtpVelocity, &m_dPtpAccel, &m_dPtpDecel);
-	if (!bResult)
-	{
-		AfxMessageBox(_T("设置运动参数失败！"));
+	CString errorMsg;
+	if (!ValidateMotionParameters(m_nRelPosition, errorMsg)) {
+		AfxMessageBox(errorMsg);
+		AppendLog(errorMsg);
 		return;
 	}
 
-	// 2. 根据方向确定位移值的正负
-	int distance = m_nRelPosition;
-	if (m_nRelDirection == 1) // 1 代表 CCW (反向)
+
+	// 将UI PTP速度/加速度 (物理单位/s) 转换为驱动器需要的 (转/s)
+	double dPtpVelocity_rps = ConvertUnitsPerSecToRps(m_dPtpVelocity);
+	double dPtpAccel_rps_s2 = ConvertUnitsPerSecSqToRpsPerSecSq(m_dPtpAccel);
+	double dPtpDecel_rps_s2 = ConvertUnitsPerSecSqToRpsPerSecSq(m_dPtpDecel);
+
+	// 1. 设置P2P运动参数
+	BOOL bResult = m_ModbusRTUHelper.SetP2PProfile(m_nNodeID, &dPtpVelocity_rps, &dPtpAccel_rps_s2, &dPtpDecel_rps_s2);
+	if (!bResult)
 	{
-		distance = -m_nRelPosition;
+		AfxMessageBox(_T("运动前设置PTP参数失败(速度)"));
+		AppendLog(_T("运动前设置PTP参数失败(速度)"));
+		return;
 	}
 
-	// 3. 执行相对位置运动 (FeedtoLength)
-	bResult = m_ModbusRTUHelper.FeedtoLength(m_nNodeID, &distance);
+	// 2. 将UI输入的相对距离 (物理单位) 转换为驱动器需要的步数 (可能超出int范围)
+	long nRelPositionSteps = ConvertUnitsToSteps(m_nRelPosition);
+	// 3. 根据方向确定位移值的正负
+	if (m_nRelDirection == 0) { 
+		nRelPositionSteps = -nRelPositionSteps;
+	}
+	int nRelPositionStepsInt = static_cast<int>(nRelPositionSteps);
+	// 4.执行相对运动
+	bResult = m_ModbusRTUHelper.FeedtoLength(m_nNodeID, &nRelPositionStepsInt);
+
 	if (!bResult)
 	{
 		AfxMessageBox(_T("启动相对运动失败！"));
+		AppendLog(_T("启动相对运动失败。"));
+	}
+	else {
+		CString str;
+		str.Format(_T("相对运动启动，距离: %.3f %s，方向: %s"), m_nRelPosition, m_sPhysicalUnitName, m_nRelDirection == 0 ? _T("CW") : _T("CCW"));
+		AppendLog(str);
 	}
 }
 
@@ -910,6 +906,7 @@ void CMotorControlDlg::OnBnClickedButtonRelMoveStop()
 {
 	if (!m_ModbusRTUHelper.IsOpen()) return;
 	m_ModbusRTUHelper.StopAndKillwithNormalDecel(m_nNodeID);
+	AppendLog(_T("相对运动停止。"));
 }
 
 void CMotorControlDlg::AppendLog(const CString& sMessage)
@@ -945,12 +942,12 @@ void CMotorControlDlg::AppendLog(const CString& sMessage)
 }
 
 
-// --- 用下面的新版本替换旧的 RotateLogFiles 函数 ---
+
 void CMotorControlDlg::RotateLogFiles()
 {
 	const ULONGLONG MAX_LOG_SIZE = 500 * 1024 * 1024; // 500 MB
 
-													  // 使用新的辅助函数来获取文件路径
+	// 使用辅助函数来获取文件路径
 	CString sLogPath = GetLogFilePath(_T("MotorControl.log"));
 	CString sLogPath1 = GetLogFilePath(_T("MotorControl.1.log"));
 	CString sLogPath2 = GetLogFilePath(_T("MotorControl.2.log"));
@@ -975,20 +972,121 @@ void CMotorControlDlg::RotateLogFiles()
 }
 CString CMotorControlDlg::GetLogFilePath(const CString& sFileName)
 {
-	// 1. 获取 .exe 文件所在的完整路径
+	
 	TCHAR szExePath[MAX_PATH] = { 0 };
 	GetModuleFileName(NULL, szExePath, MAX_PATH);
 
-	// 2. 从完整路径中移除 .exe 文件名，只剩下目录
 	PathRemoveFileSpec(szExePath);
 
-	// 3. 构建 log 文件夹的路径
 	CString sLogDir = szExePath;
 	sLogDir += _T("\\log");
 
-	// 4. 创建 log 文件夹 (如果文件夹已存在，此函数不会做任何事，非常安全)
 	CreateDirectory(sLogDir, NULL);
 
-	// 5. 返回最终的、包含文件夹的完整文件路径
 	return sLogDir + _T("\\") + sFileName;
+}
+
+//对单位输入框的非空检查和有效值判断
+bool CMotorControlDlg::IsKinematicParamsValid()
+{
+	// 检查基本参数
+	if (m_nStepsPerRevolution <= 0 || m_dPhysicalValuePerRevolution <= 0.0 || m_sPhysicalUnitName.IsEmpty()) {
+		return false;
+	}
+
+	// 检查参数是否会导致计算溢出
+	// 例如：如果每转步数过大，或每转单位值过小，可能导致换算系数过大
+	double conversion_factor = static_cast<double>(m_nStepsPerRevolution) / m_dPhysicalValuePerRevolution;
+	if (conversion_factor > 1e10 || conversion_factor < 1e-10) {
+		return false; // 换算系数过大或过小，可能导致计算问题
+	}
+
+	return true;
+}
+
+//======================以下为单位换算函数==========================
+
+//unit --> rps
+double CMotorControlDlg::ConvertUnitsPerSecToRps(double units_per_sec)
+{
+	if (!IsKinematicParamsValid()) {
+		// 通常在调用前应检查 IsKinematicParamsValid，这里作为双重保险
+		return 0.0;
+	}
+	// (单位/s) / (单位/转) = 转/s
+	return units_per_sec / m_dPhysicalValuePerRevolution;
+}
+
+//unit --> rps/s
+double CMotorControlDlg::ConvertUnitsPerSecSqToRpsPerSecSq(double units_per_sec_sq)
+{
+	if (!IsKinematicParamsValid()) {
+		return 0.0;
+	}
+	// (单位/s^2) / (单位/转) = 转/s^2
+	return units_per_sec_sq / m_dPhysicalValuePerRevolution;
+}
+
+//Unit --> Steps
+long CMotorControlDlg::ConvertUnitsToSteps(double units)
+{
+	if (!IsKinematicParamsValid()) {
+		return 0;
+	}
+
+	// 使用double进行计算，保持精度
+	double steps_double = units * (static_cast<double>(m_nStepsPerRevolution) / m_dPhysicalValuePerRevolution);
+
+	// 检查是否超出long范围
+	if (steps_double > LONG_MAX || steps_double < LONG_MIN) {
+		// 记录错误日志
+		CString errorMsg;
+		errorMsg.Format(_T("单位换算溢出: %.3f %s 转换为步数时超出范围"), units, m_sPhysicalUnitName);
+		AppendLog(errorMsg);
+		return 0;
+	}
+
+
+	return static_cast<long>(steps_double);
+}
+
+//Steps --> Unit 
+double CMotorControlDlg::ConvertStepsToUnits(long steps) // 参数类型由long改为 int
+{
+	if (!IsKinematicParamsValid()) {
+		return 0.0;
+	}
+
+	// 使用double进行计算，保持精度
+	return static_cast<double>(steps) * (m_dPhysicalValuePerRevolution / static_cast<double>(m_nStepsPerRevolution));
+}
+
+
+bool CMotorControlDlg::IsStepsValueSafe(long steps)
+{
+	return (steps >= INT_MIN && steps <= INT_MAX);
+}
+
+// 新增：验证运动参数的综合安全性
+bool CMotorControlDlg::ValidateMotionParameters(double position_units, CString& errorMsg)
+{
+	if (!IsKinematicParamsValid()) {
+		errorMsg = _T("运动参数无效：请检查每转步数、每转单位数和单位名称");
+		return false;
+	}
+
+	// 检查输入的物理值是否合理
+	if (fabs(position_units) > 1000000.0) { // 假设超过100万单位就认为不合理
+		errorMsg.Format(_T("输入的位置值过大：%.3f %s，可能导致计算溢出"), position_units, m_sPhysicalUnitName);
+		return false;
+	}
+
+	// 转换为步数并检查范围
+	long steps = ConvertUnitsToSteps(position_units);
+	if (!IsStepsValueSafe(steps)) {
+		errorMsg.Format(_T("计算的步数 %ld 超出驱动器支持的范围 [%d, %d]"), steps, INT_MIN, INT_MAX);
+		return false;
+	}
+
+	return true;
 }

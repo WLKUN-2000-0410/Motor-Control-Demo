@@ -1,14 +1,16 @@
 
 // MotorControlDlg.h : 头文件
 //
-
 #pragma once
-#include "ModbusRTUHelper.h"
-#include "JogButton.h"
+
+#include "ModbusRTUHelper.h"     //Modbus RTU通信辅助类
+#include "JogButton.h"			 //自定义JOG按钮类
+
+
+
 // CMotorControlDlg 对话框
 class CMotorControlDlg : public CDialogEx
 {
-// 构造
 public:
 	CMotorControlDlg(CWnd* pParent = NULL);	// 标准构造函数
 	virtual ~CMotorControlDlg();
@@ -26,40 +28,40 @@ protected:
 protected:
 	HICON m_hIcon;
 
-	// 成员变量
 	ModbusRTUHelper m_ModbusRTUHelper;
 	int m_nCOMPort;
 	int m_nBaudRate;
 	byte m_nNodeID;
 	
-	double m_dJogSpeed;
+	double m_dJogSpeed;			
 	double m_dJogAccel;
 	double m_dJogDecel;
 
-	CString m_sCurrentPosition;
-	BOOL m_bAutoHomeOnConnect; 
-	bool m_bIsHoming;          //  正在回零的状态标志
+	CString m_sCurrentPosition; 
+	BOOL m_bAutoHomeOnConnect;  
+	bool m_bIsHoming;          
 	bool m_bIsEscapingHomeSensor;
 
-	double m_dPtpVelocity;   // PTP: Point-to-Point
+	double m_dPtpVelocity;					// PTP: Point-to-Point
 	double m_dPtpAccel;
 	double m_dPtpDecel;
-	int m_nAbsPosition;
-	int m_nRelPosition;
-	int m_nRelDirection;     // 0 for CW (正向), 1 for CCW (反向)
+	double m_nAbsPosition;
+	double m_nRelPosition;
+	int m_nRelDirection;					// 0 for CCW (反向), 1 for CW (正向)
+
+	int m_nStepsPerRevolution;              //电机每转的步数，如每转20000步
+	double m_dPhysicalValuePerRevolution;   //每转的单位数 
+	CString m_sPhysicalUnitName;            //单位名称，如mm，um等
 
 	// 控件变量
 	CComboBox m_cmbComPort;
 	CComboBox m_cmbBaud;
 	CComboBox m_cmbNodeID;
-	CEdit m_editJogSpeed;
-	CEdit m_editJogAccel;
-	CEdit m_editJogDecel;       
+      
 	CJogButton m_btnJogPlus;      //正转
 	CJogButton m_btnJogMinus;     //反转
-	CEdit m_editCurrentPosition;  //当前位置
 	CComboBox m_cmbRelDirection;  //方向选择
-
+	CEdit m_editCurrentPosition;
 	//LED
 	CStatic m_ledX1;
 	CStatic m_ledX2;
@@ -67,7 +69,7 @@ protected:
 	HICON m_hIconLedGreen; 
 	HICON m_hIconLedGray;  
 
-	//LED
+	//日志输出编辑框
 	CEdit m_editLog;
 
 	// 生成的消息映射函数
@@ -80,14 +82,12 @@ protected:
 	afx_msg LRESULT OnJogButtonUp(WPARAM wParam, LPARAM lParam);
 	DECLARE_MESSAGE_MAP()
 
-	//测试按钮，后续删除
-	void TestMotorCommunication();
 
 public:
 	afx_msg void OnBnClickedButtonConnect();
 	afx_msg void OnBnClickedButtonDisconnect();
 	afx_msg void OnBnClickedButtonHome();
-	afx_msg void OnBnClickedButtonTest();
+	afx_msg void OnBnClickedButtonEmergencyStop();
 
 	afx_msg void OnBnClickedButtonAbsMoveStart();
 	afx_msg void OnBnClickedButtonAbsMoveStop();
@@ -95,14 +95,25 @@ public:
 	afx_msg void OnBnClickedButtonRelMoveStop();
 
 private:
-	void UpdateSensorStatus();  //更新传感器状态
-	void ScanComPorts();
-	void UpdateConnectStatus(bool isConnect, bool isHoming = false); // <--- 3. 修改函数声明以处理回零状态
+	void UpdateSensorStatus();										  //更新传感器x1,x2,x3状态
+	void ScanComPorts();											  //扫描com口
+	void UpdateConnectStatus(bool isConnect, bool isHoming = false);  //**更新窗口标题和按钮使能状态
 	void CheckHomingStatus();
 	void StartHomingProcess();
 	void ExecuteOneEscapeStep();
-	//log
-	void AppendLog(const CString& sMessage); // 统一的日志追加函数
-	void RotateLogFiles();                   // 负责检查和滚动日志文件的函数
-	CString GetLogFilePath(const CString& sFileName);
+	
+	//日志
+	void AppendLog(const CString& sMessage);					      //统一的日志生成函数，同时输出到UI和日志文件
+	void RotateLogFiles();											  //负责检查和滚动日志文件的函数
+	CString GetLogFilePath(const CString& sFileName);                 //日志生成位置:
+	
+	//单位转换
+	bool IsKinematicParamsValid();									  //检查运动学参数是否有效，包括每转单位数和单位名称
+	double ConvertUnitsPerSecToRps(double units_per_sec);			  //Units-->rps
+	double ConvertUnitsPerSecSqToRpsPerSecSq(double units_per_sec_sq);//Units-->rps/s
+	long ConvertUnitsToSteps(double units);							  //Units-->steps
+	double ConvertStepsToUnits(long steps);							  //Steps-->Units
+
+	bool CMotorControlDlg::IsStepsValueSafe(long steps);
+	bool CMotorControlDlg::ValidateMotionParameters(double position_units, CString& errorMsg);
 };
